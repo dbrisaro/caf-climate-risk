@@ -18,7 +18,6 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 ALL_COUNTRIES = [
     'Haiti', 'Dominican Republic', 'Trinidad and Tobago', 'Jamaica',
     'Barbados', 'Bahamas', 'Saint Lucia', 'Dominica',
-    'Colombia', 'Peru', 'Guyana',
 ]
 
 SOCIAL_CATS = ['salud', 'escuelas', 'gobierno', 'emergencia']

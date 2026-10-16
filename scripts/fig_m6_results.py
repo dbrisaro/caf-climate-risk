@@ -6,8 +6,9 @@ import matplotlib.patches as mpatches
 from pathlib import Path
 
 BASE_DIR = Path('/home/jupyter-daniela/CAF')
-FE_PATH  = BASE_DIR / 'outputs/regression/fixed_effects.csv'
-CF_PATH  = BASE_DIR / 'outputs/regression/coefficients_standardized.csv'
+FE_PATH   = BASE_DIR / 'outputs/regression/m6_carib_fixed_effects.csv'
+CF_PATH   = BASE_DIR / 'outputs/regression/m6_carib_coefficients.csv'
+DEC_PATH  = BASE_DIR / 'outputs/regression/m6_carib_decomposition.csv'
 OUT_FIG  = BASE_DIR / 'outputs/regression'
 OUT_REG  = BASE_DIR / 'outputs/regression'
 
@@ -20,8 +21,9 @@ sys.path.append('/home/jupyter-daniela/CAF/src')
 import style
 style.apply()
 
-fe = pd.read_csv(FE_PATH)
-cf = pd.read_csv(CF_PATH)
+fe  = pd.read_csv(FE_PATH)
+cf  = pd.read_csv(CF_PATH)
+dec = pd.read_csv(DEC_PATH).set_index('group')
 
 print("=" * 62)
 print("Fixed effects — M6 (reference: Bahamas)")
@@ -29,10 +31,10 @@ print("=" * 62)
 print(f"  {'Country':<25} {'α_i':>7} {'SE':>7} {'p':>7} {'GDP/cap':>9}")
 print("  " + "-" * 57)
 for _, r in fe.iterrows():
-    alpha = f"{r['alpha_i']:.4f}" if pd.notna(r['alpha_i']) else "0.0000 (ref)"
-    se    = f"{r['alpha_se']:.4f}" if pd.notna(r['alpha_se']) else "—"
-    p     = f"{r['alpha_p']:.4f}" if pd.notna(r['alpha_p']) else "—"
-    gdp   = f"${r['gdp_pc_usd']:,.0f}"
+    alpha = f"{r['fixed_effect']:.4f}" if pd.notna(r['fixed_effect']) else "0.0000 (ref)"
+    se    = f"{r['se']:.4f}" if pd.notna(r['se']) else "—"
+    p     = f"{r['p_value']:.4f}" if pd.notna(r['p_value']) else "—"
+    gdp   = f"${r['gdp_per_capita_usd']:,.0f}"
     print(f"  {r['country']:<25} {alpha:>12} {se:>7} {p:>7} {gdp:>9}")
 
 def sig(p):
@@ -58,11 +60,11 @@ lines = [
     r'\midrule',
 ]
 for _, r in fe.iterrows():
-    is_ref = pd.isna(r['alpha_se'])
-    alpha_str = f"{r['alpha_i']:.4f}{sig(r['alpha_p'])}" if not is_ref else r'0.0000 \textit{(ref.)}'
-    se_str    = f"{r['alpha_se']:.4f}" if not is_ref else '—'
-    p_str     = f"{r['alpha_p']:.4f}" if not is_ref else '—'
-    gdp_str   = f"\\${r['gdp_pc_usd']:,.0f}"
+    is_ref    = pd.isna(r['se'])
+    alpha_str = f"{r['fixed_effect']:.4f}{sig(r['p_value'])}" if not is_ref else r'0.0000 \textit{(ref.)}'
+    se_str    = f"{r['se']:.4f}" if not is_ref else '—'
+    p_str     = f"{r['p_value']:.4f}" if not is_ref else '—'
+    gdp_str   = f"\\${r['gdp_per_capita_usd']:,.0f}"
     lines.append(f"{r['country']} & {alpha_str} & {se_str} & {p_str} & {gdp_str} \\\\")
 
 lines += [
@@ -76,12 +78,7 @@ with open(OUT_REG / 'fixed_effects_table.tex', 'w') as f:
     f.write('\n'.join(lines))
 print("\n  Saved: fixed_effects_table.tex")
 
-fe_clean = fe.rename(columns={
-    'alpha_i': 'fixed_effect', 'alpha_se': 'se',
-    'alpha_p': 'p_value',      'gdp_pc_usd': 'gdp_per_capita_usd'
-})[['country', 'fixed_effect', 'se', 'p_value', 'gdp_per_capita_usd']]
-fe_clean.to_csv(OUT_REG / 'fixed_effects_clean.csv', index=False)
-print("  Saved: fixed_effects_clean.csv")
+print("  (fixed_effects_clean.csv written by 07d — no rewrite needed)")
 
 print("\n[Fig 1] M6 coefficient dot plot …")
 
@@ -112,8 +109,7 @@ COLORS = {
 }
 
 m6 = (cf[cf['variable'].isin(VAR_LABELS)]
-      [['variable', 'M6_coef', 'M6_se']]
-      .rename(columns={'M6_coef': 'coef', 'M6_se': 'se'})
+      [['variable', 'coef', 'se']]
       .dropna(subset=['coef'])
       .copy())
 m6['label'] = m6['variable'].map(VAR_LABELS)
@@ -160,11 +156,14 @@ print(f"  Saved: {out1.name}")
 
 print("\n[Fig 2] Within-country variance decomposition …")
 
-r2_full   = 0.0449
+r2_full          = float(dec.loc['r2_full',  'partial_r2'])
+partial_built    = float(dec.loc['built',    'partial_r2'])
+partial_hazard   = float(dec.loc['hazard',   'partial_r2'])
+partial_controls = float(dec.loc['controls', 'partial_r2'])
 shares = {
-    'Built\nenvironment': 0.0148 / r2_full,
-    'Hazard':             0.0300 / r2_full,
-    'Controls':           0.0001 / r2_full,
+    'Built\nenvironment': float(dec.loc['built',    'share']),
+    'Hazard':             float(dec.loc['hazard',   'share']),
+    'Controls':           float(dec.loc['controls', 'share']),
 }
 colors_bar = ['#2166ac', '#d6604d', '#888888']
 
@@ -187,15 +186,15 @@ ax.tick_params(axis='x', labelsize=10)
 ax.tick_params(axis='y', labelsize=9)
 ax.grid(axis='y', alpha=0.3, linewidth=0.4, zorder=0)
 
-ax.text(0, vals[0] / 2, f'R²={0.0148:.4f}', ha='center', va='center',
+ax.text(0, vals[0] / 2, f'ΔR²={partial_built:.4f}', ha='center', va='center',
         fontsize=8, color='white', fontweight='bold')
-ax.text(1, vals[1] / 2, f'R²={0.0300:.4f}', ha='center', va='center',
+ax.text(1, vals[1] / 2, f'ΔR²={partial_hazard:.4f}', ha='center', va='center',
         fontsize=8, color='white', fontweight='bold')
 
 ax.annotate(
-    f'R²_within (M6) = {r2_full:.4f}\n'
-    f'(4.5% of within-country SS;\n'
-    f'71.7% of total SS is within-country)',
+    f'Within-R² (M6) = {r2_full:.4f}\n'
+    f'N=2,583  |  271 regions  |  8 countries\n'
+    f'PanelOLS entity FE, country-clustered SE',
     xy=(0.97, 0.97), xycoords='axes fraction',
     ha='right', va='top', fontsize=7.5, color='#555555',
     bbox=dict(boxstyle='round,pad=0.3', facecolor='#f5f5f5',

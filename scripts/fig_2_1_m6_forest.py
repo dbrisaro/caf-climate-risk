@@ -16,7 +16,7 @@ INDIR  = BASE / 'outputs/regression'
 OUTDIR = BASE / 'outputs/regression'
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
-df = pd.read_csv(INDIR / 'coefficients_split.csv')
+df = pd.read_csv(INDIR / 'm6_carib_coefficients.csv')
 
 M6_VARS = ['built_s', 'built_v', 'drought', 'rainfall', 'heatwave', 'wind_kt',
            'log_pop', 'log_gdp']
@@ -33,9 +33,9 @@ LABELS = {
 }
 
 row   = df[df['variable'].isin(M6_VARS)].set_index('variable')
-coefs = row['Caribe_coef'].astype(float)
-ses   = row['Caribe_se'].astype(float)
-pvals = row['Caribe_p'].astype(float)
+coefs = row['coef'].astype(float)
+ses   = row['se'].astype(float)
+pvals = row['pvalue'].astype(float)
 
 ci_lo = coefs - 1.96 * ses
 ci_hi = coefs + 1.96 * ses
@@ -80,8 +80,8 @@ for spine in ax.spines.values():
 ax.spines['bottom'].set_visible(True)
 ax.spines['bottom'].set_linewidth(0.5)
 
-r2_val = df[df['variable'] == 'R²']['Caribe_coef'].values
-n_val  = df[df['variable'] == 'N']['Caribe_coef'].values
+r2_val = df[df['variable'] == 'R2_within']['coef'].values
+n_val  = df[df['variable'] == 'N']['coef'].values
 if len(r2_val) and len(n_val):
     ax.text(0.97, 0.03,
             f"R² = {float(r2_val[0]):.3f}   N = {int(float(n_val[0])):,}",

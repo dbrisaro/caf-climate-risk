@@ -11,7 +11,7 @@ import style; style.apply()
 
 BASE_DIR = Path('/home/jupyter-daniela/CAF')
 OSM_CSV  = BASE_DIR / 'data/OSM/osm_top_ciudades_caribe_continentales.csv'
-LOSS_CSV = BASE_DIR / 'outputs/losses/loss_by_building.csv'
+LOSS_CSV = BASE_DIR / 'outputs/losses/loss_by_type_storm.csv'
 OUT_DIR  = BASE_DIR / 'outputs/losses'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -131,8 +131,7 @@ by_storm['social_pct'] = 100 * by_storm['social'] / by_storm['total'].replace(0,
 by_storm = by_storm[by_storm['total'] > 0].sort_values('total', ascending=False)
 
 print("\n" + "=" * 65)
-print("Wind losses from 10 EM-DAT storms — social vs other (B05)")
-print("  Note: losses dominated by Cuba (not in 8-country M6 sample)")
+print("Wind losses — social vs other buildings (full 1980–2025 catalog)")
 print("=" * 65)
 print(f"{'Storm':<22} {'Social':>12} {'Other':>12} {'Total':>12} {'Social%':>8}")
 print("-" * 65)
@@ -142,7 +141,8 @@ for storm, row in by_storm.iterrows():
 
 total_social_loss = df_loss[df_loss.is_social]['loss_mid'].sum()
 total_all_loss    = df_loss['loss_mid'].sum()
-print(f"\nAll 10 storms: social = ${total_social_loss/1e6:.2f}M  |  "
+n_storms_total = df_loss['storm_id'].nunique()
+print(f"\nAll {n_storms_total} storms: social = ${total_social_loss/1e6:.2f}M  |  "
       f"total = ${total_all_loss/1e6:.2f}M  |  "
       f"social share = {100*total_social_loss/total_all_loss:.1f}%")
 
@@ -172,8 +172,8 @@ ax2.legend(fontsize=8)
 ax2.xaxis.grid(True, alpha=0.3, zorder=0)
 ax2.set_axisbelow(True)
 
-fig.suptitle('Social infrastructure wind losses — 10 EM-DAT cyclones (B05)\n'
-             'Storm 2025291N11319 dominates; losses concentrated in Cuba',
+fig.suptitle('Social infrastructure wind losses — full 1980–2025 catalog (B05)\n'
+             '8 Caribbean study countries, 916,772 buildings',
              fontsize=10, y=1.01)
 fig.tight_layout()
 fig.savefig(OUT_DIR / 'fig_q3_loss_share.png', dpi=150, bbox_inches='tight')

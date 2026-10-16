@@ -221,17 +221,16 @@ fe['note'] = fe['p_value'].apply(
 del fe
 
 print("  Fig_2_1_M6Coefs …")
-M6_VARS = ['built_s', 'built_v', 'drought', 'rainfall', 'heatwave', 'wind_kt',
-           'built_s_x_haz', 'pop']
-split = pd.read_csv(BASE / 'outputs/regression/coefficients_split.csv')
-m6c = split[split['variable'].isin(M6_VARS)].copy()
-m6c['ci_95_lo'] = (m6c['Caribe_coef'] - 1.96 * m6c['Caribe_se']).round(4)
-m6c['ci_95_hi'] = (m6c['Caribe_coef'] + 1.96 * m6c['Caribe_se']).round(4)
-(m6c[['variable', 'Caribe_coef', 'Caribe_se', 'ci_95_lo', 'ci_95_hi', 'Caribe_p']]
-   .rename(columns={'Caribe_coef': 'coef_std', 'Caribe_se': 'se_std', 'Caribe_p': 'p_value'})
+M6_VARS = ['built_s', 'built_v', 'drought', 'rainfall', 'heatwave', 'wind_kt', 'log_pop', 'log_gdp']
+m6c = pd.read_csv(BASE / 'outputs/regression/m6_carib_coefficients.csv')
+m6c = m6c[m6c['variable'].isin(M6_VARS)].copy()
+m6c['ci_95_lo'] = (m6c['coef'] - 1.96 * m6c['se']).round(4)
+m6c['ci_95_hi'] = (m6c['coef'] + 1.96 * m6c['se']).round(4)
+(m6c[['variable', 'coef', 'se', 'ci_95_lo', 'ci_95_hi', 'pvalue']]
+   .rename(columns={'coef': 'coef_std', 'se': 'se_std', 'pvalue': 'p_value'})
    .sort_values('coef_std', ascending=False)
    .to_excel(writer, sheet_name='Fig_2_1_M6Coefs', index=False))
-del split, m6c
+del m6c
 
 print("  Fig_3_2_WindLosses …")
 t51 = pd.read_csv(BASE / 'outputs/losses/table_5_1_wind_by_country_storm.csv')

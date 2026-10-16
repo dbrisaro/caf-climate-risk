@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 BASE_DIR = Path('/home/jupyter-daniela/CAF')
-FE_PATH  = BASE_DIR / 'outputs/regression/fixed_effects.csv'
+FE_PATH  = BASE_DIR / 'outputs/regression/m6_carib_fixed_effects.csv'
 OUT_PATH = BASE_DIR / 'outputs/regression/fixed_effects_by_country.png'
 
 plt.rcParams.update({
@@ -19,19 +19,19 @@ style.apply()
 
 fe = pd.read_csv(FE_PATH)
 
-fe['alpha_se'] = fe['alpha_se'].fillna(0.0)
-fe['ci95'] = 1.96 * fe['alpha_se']
+fe['se'] = fe['se'].fillna(0.0)
+fe['ci95'] = 1.96 * fe['se']
 
-fe = fe.sort_values('alpha_i', ascending=True).reset_index(drop=True)
+fe = fe.sort_values('fixed_effect', ascending=True).reset_index(drop=True)
 
 POS_COLOR = '#2166ac'
 NEG_COLOR = '#d6604d'
 REF_COLOR = '#888888'
 
 def point_color(row):
-    if row['alpha_i'] == 0.0 and row['alpha_se'] == 0.0:
+    if row['fixed_effect'] == 0.0 and row['se'] == 0.0:
         return REF_COLOR
-    return POS_COLOR if row['alpha_i'] >= 0 else NEG_COLOR
+    return POS_COLOR if row['fixed_effect'] >= 0 else NEG_COLOR
 
 fe['color'] = fe.apply(point_color, axis=1)
 
@@ -39,22 +39,22 @@ fig, ax = plt.subplots(figsize=(7.5, 5.2))
 
 for i, row in fe.iterrows():
     ax.plot(
-        [row['alpha_i'] - row['ci95'], row['alpha_i'] + row['ci95']],
+        [row['fixed_effect'] - row['ci95'], row['fixed_effect'] + row['ci95']],
         [i, i],
         color=row['color'], lw=2.0, alpha=0.55, solid_capstyle='round',
     )
-    is_ref = (row['alpha_se'] == 0.0 and row['alpha_i'] == 0.0)
+    is_ref = (row['se'] == 0.0 and row['fixed_effect'] == 0.0)
     ax.scatter(
-        row['alpha_i'], i,
+        row['fixed_effect'], i,
         color=row['color'], s=60, zorder=5,
         edgecolors='white', linewidths=0.7,
         marker='D' if is_ref else 'o',
     )
 
-x_max = (fe['alpha_i'] + fe['ci95']).max()
+x_max = (fe['fixed_effect'] + fe['ci95']).max()
 for i, row in fe.iterrows():
-    gdp_label = f"GDP/cap: ${row['gdp_pc_usd']:,.0f}"
-    x_anchor  = row['alpha_i'] + row['ci95'] + 0.04
+    gdp_label = f"GDP/cap: ${row['gdp_per_capita_usd']:,.0f}"
+    x_anchor  = row['fixed_effect'] + row['ci95'] + 0.04
     ax.text(
         x_anchor, i, gdp_label,
         va='center', ha='left', fontsize=8.2, color='#444444',
