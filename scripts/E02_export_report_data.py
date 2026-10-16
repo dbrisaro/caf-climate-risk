@@ -273,14 +273,14 @@ for col in ['loss_low', 'loss_mid', 'loss_high']:
    .to_excel(writer, sheet_name='Fig_3_3_TopEvents', index=False))
 del t51b, agg, top5
 
-print("  Fig_3_7_AEP_Modeled …")
+print("  AEP_Wind_Modeled …")
 aep_mod = pd.read_csv(BASE / 'outputs/losses/aep_modeled.csv')
 for col in ['loss_low', 'loss_mid', 'loss_high']:
     aep_mod[f'{col}_MUSD'] = (aep_mod[col] / 1e6).round(3)
 cols_mod = [c for c in ['name', 'year', 'category', 'rank', 'rp', 'aep_pct',
                           'loss_low_MUSD', 'loss_mid_MUSD', 'loss_high_MUSD']
               if c in aep_mod.columns]
-aep_mod[cols_mod].to_excel(writer, sheet_name='Fig_3_7_AEP_Modeled', index=False)
+aep_mod[cols_mod].to_excel(writer, sheet_name='AEP_Wind_Modeled', index=False)
 del aep_mod
 
 print("  Fig_3_8_InfraShare …")
