@@ -19,6 +19,7 @@ ERA5_TMAX_DIR = Path('/home/jupyter-daniela/suyana/sources/era5/statistics/tmax/
 EXCESS_CACHE  = BASE_DIR / 'data/processed/caribbean_adm_boundaries/hazard_excess.parquet'
 ANOMALY_CACHE = BASE_DIR / 'data/processed/caribbean_adm_boundaries/hazard_anomaly.parquet'
 OUT_DIR       = BASE_DIR / 'outputs/regression'
+GDP_CACHE     = BASE_DIR / 'data/processed/caribbean_adm_boundaries/wb_gdp_pc_NY.GDP.PCAP.KD_1995_2025_11c.csv'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 WB_ISO = {
@@ -44,34 +45,47 @@ print("\n[1] Loading data …")
 df  = pd.read_parquet(DATA_PATH)
 gdf = gpd.read_file(SHAPEFILE)[['region_nam', 'country']].rename(
         columns={'region_nam': 'region_name'})
+# Region names shared across countries are a single merged series in master_panel,
+# which is keyed by name only; they are excluded pending a rebuild of the panel
+# with unique region keys.
+name_ctry = gdf.groupby('region_name')['country'].nunique()
+AMBIG     = sorted(name_ctry[name_ctry > 1].index)
+print(f"    Excluding shared region names ({len(AMBIG)}): {', '.join(AMBIG)}")
+df  = df[~df['region_name'].isin(AMBIG)]
 df  = df.merge(gdf, on='region_name', how='left')
 
-print("    Fetching GDP per capita from World Bank …")
-iso_str = ';'.join(WB_ISO.values())
-wb_data = None
-for _attempt in range(3):
-    try:
-        wb_data = requests.get(
-            f'https://api.worldbank.org/v2/country/{iso_str}/indicator/'
-            f'NY.GDP.PCAP.KD?date=1995:2025&format=json&per_page=500', timeout=120
-        ).json()[1]
-        break
-    except Exception as e:
-        print(f"      Attempt {_attempt+1} failed: {e}")
-if wb_data is None:
-    raise RuntimeError("World Bank API unavailable after 3 attempts")
-iso_to_country = {v: k for k, v in WB_ISO.items()}
-df_gdp = pd.DataFrame([
-    {'country': iso_to_country[r['country']['id']],
-     'year':    int(r['date']),
-     'gdp_pc':  r['value']}
-    for r in wb_data if r['value'] is not None
-])
+if GDP_CACHE.exists():
+    print(f"    GDP per capita: {GDP_CACHE.name} (cached World Bank series)")
+    df_gdp = pd.read_csv(GDP_CACHE)
+else:
+    print("    Fetching GDP per capita from World Bank …")
+    iso_str = ';'.join(WB_ISO.values())
+    wb_data = None
+    for _attempt in range(3):
+        try:
+            wb_data = requests.get(
+                f'https://api.worldbank.org/v2/country/{iso_str}/indicator/'
+                f'NY.GDP.PCAP.KD?date=1995:2025&format=json&per_page=500', timeout=120
+            ).json()[1]
+            break
+        except Exception as e:
+            print(f"      Attempt {_attempt+1} failed: {e}")
+    if wb_data is None:
+        raise RuntimeError("World Bank API unavailable after 3 attempts")
+    iso_to_country = {v: k for k, v in WB_ISO.items()}
+    df_gdp = pd.DataFrame([
+        {'country': iso_to_country[r['country']['id']],
+         'year':    int(r['date']),
+         'gdp_pc':  r['value']}
+        for r in wb_data if r['value'] is not None
+    ]).sort_values(['country', 'year']).reset_index(drop=True)
+    df_gdp.to_csv(GDP_CACHE, index=False)
+    print(f"    Saved → {GDP_CACHE}")
 
 panel = (
     df.groupby(['region_name', 'country', 'year'])
     .agg(
-        total_losses_musd = ('total_losses_musd', 'sum'),
+        total_losses_musd = ('total_losses_musd', 'mean'),
         built_s           = ('built_s',    'mean'),
         built_v           = ('built_v',    'mean'),
         pop               = ('pop',        'mean'),
