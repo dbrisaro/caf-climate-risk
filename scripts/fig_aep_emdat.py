@@ -10,7 +10,8 @@ OUT_DIR  = BASE_DIR / 'outputs/losses'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 LOSS_DIR = BASE_DIR / 'outputs/losses'
 
-T    = 45
+YEAR_MIN, YEAR_MAX = 1980, 2025
+T    = YEAR_MAX - YEAR_MIN + 1
 ISOS = ['HTI','DOM','JAM','BHS','DMA','BRB','TTO','LCA','COL','PER','GUY']
 VSL  = {'HTI':1.1,'DOM':1.1,'JAM':1.1,'BHS':7.9,
         'DMA':1.1,'BRB':7.9,'TTO':7.9,'LCA':1.1,
@@ -23,8 +24,8 @@ df   = pd.read_excel(xlsx)
 
 sub = df[
     (df['ISO'].isin(ISOS)) &
-    (df['Start Year'] >= 1980) &
-    (df['Start Year'] <= 2025) &
+    (df['Start Year'] >= YEAR_MIN) &
+    (df['Start Year'] <= YEAR_MAX) &
     (df['Disaster Subgroup'].isin(SUBGROUPS))
 ].copy()
 
@@ -52,7 +53,7 @@ ann = (ev.groupby('Start Year')
                                sorted(set(c for v in x for c in v.split(', ')))))[:20])
          .reset_index())
 
-all_years = pd.DataFrame({'Start Year': range(1980, 2026)})
+all_years = pd.DataFrame({'Start Year': range(YEAR_MIN, YEAR_MAX + 1)})
 ann = all_years.merge(ann, on='Start Year', how='left').fillna(0)
 
 def compute_aep_annual(col, df=ann, t=T):

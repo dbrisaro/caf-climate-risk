@@ -9,7 +9,6 @@ OUT  = BASE / 'outputs/reports/report_data_all_countries.xlsx'
 
 EMDAT_PATH = list((BASE / 'data/EMDAT').glob('*.xlsx'))[0]
 
-T         = 45
 SUBGROUPS = ['Meteorological', 'Hydrological', 'Climatological']
 STUDY     = list(range(1995, 2026))
 BASELINE  = list(range(1995, 2010))
@@ -28,6 +27,9 @@ ISOS = {
     'PER': ('Peru',                 1.1),
     'GUY': ('Guyana',               1.1),
 }
+
+TAB41_ISOS   = ['HTI', 'DOM', 'JAM', 'BHS', 'DMA', 'BRB', 'TTO', 'LCA']
+TAB41_YEARS  = (1900, 2025)
 
 COUNTRIES_EMDAT = [
     'Bahamas', 'Barbados', 'Dominica', 'Dominican Republic',
@@ -243,6 +245,22 @@ for col in ['loss_low', 'loss_mid', 'loss_high']:
    .to_excel(writer, sheet_name='Fig_3_2_WindLosses', index=False))
 del t51
 
+print("  Tab_3_2_WindLossByClass …")
+t53 = pd.read_csv(BASE / 'outputs/losses/table_5_3_wind_cumulative_by_country_class.csv')
+t53 = t53[t53['country'].isin(COUNTRIES_EMDAT)]
+tab32 = (t53.pivot_table(index='country', columns='building_class',
+                         values='total_loss_mid', aggfunc='sum', fill_value=0)
+            .reindex(columns=['Education', 'Government', 'Housing'], fill_value=0) / 1e6)
+tab32['Total'] = tab32.sum(axis=1)
+tab32 = tab32.sort_values('Total', ascending=False)
+tab32.loc['Total'] = tab32.sum()
+(tab32.round(3)
+      .add_suffix('_mid_MUSD')
+      .reset_index()
+      .rename(columns={'index': 'country'})
+      .to_excel(writer, sheet_name='Tab_3_2_WindLossByClass', index=False))
+del t53, tab32
+
 print("  Fig_3_3_TopEvents …")
 t51b = pd.read_csv(BASE / 'outputs/losses/table_5_1_wind_by_country_storm.csv')
 agg  = t51b.groupby(['storm_name', 'year', 'ss_category'])[['loss_low', 'loss_mid', 'loss_high']].sum().reset_index()
@@ -365,27 +383,28 @@ pd.read_csv(BASE / 'outputs/losses/aep_emdat_vsl.csv').to_excel(
 
 print("  Table_4_1 …")
 rows = []
-for iso, (name, vsl) in ISOS.items():
+for iso in TAB41_ISOS:
+    name, vsl = ISOS[iso]
     sub = emdat_raw[
         (emdat_raw['ISO'] == iso) &
-        (emdat_raw['Start Year'] >= 1980) &
-        (emdat_raw['Start Year'] <= 2025) &
+        (emdat_raw['Start Year'].between(*TAB41_YEARS)) &
         (emdat_raw['Disaster Subgroup'].isin(SUBGROUPS))
     ]
-    avg_deaths = sub['Total Deaths'].fillna(0).sum() / T
-    avg_damage = sub["Total Damage, Adjusted ('000 US$)"].fillna(0).sum() / 1000 / T
-    mort_cost  = round(avg_deaths * vsl, 2)
-    total      = round(mort_cost + avg_damage, 2)
+    deaths_ev = round(sub['Total Deaths'].mean(), 2)
+    damage_ev = sub["Total Damage, Adjusted ('000 US$)"].mean() / 1000
     rows.append({
-        'Country':                                name,
-        'Avg Annual Fatalities':                  round(avg_deaths, 2),
-        'Base VSL (M USD)':                       vsl,
-        'Annual Social Cost of Mortality (M USD)': mort_cost,
-        'Avg Annual Physical Damage (M USD)':     round(avg_damage, 2),
-        'Total Economic Impact (M USD)':          total,
+        'Country':                                          name,
+        'Fatalities per Event':                             deaths_ev,
+        'Base VSL (M USD)':                                 vsl,
+        'Social Cost of Mortality per Event (M USD)':       round(deaths_ev * vsl, 2),
+        'Physical Damage per Event (M USD)':                round(damage_ev, 2),
+        'Total Economic Impact per Event (M USD)':          round(deaths_ev * vsl + damage_ev, 2),
+        'Events with Reported Deaths':                      int(sub['Total Deaths'].notna().sum()),
+        'Events with Reported Damage':                      int(sub["Total Damage, Adjusted ('000 US$)"].notna().sum()),
+        'Events in Window':                                 len(sub),
     })
 (pd.DataFrame(rows)
-   .sort_values('Total Economic Impact (M USD)', ascending=False)
+   .sort_values('Total Economic Impact per Event (M USD)', ascending=False)
    .to_excel(writer, sheet_name='Table_4_1', index=False))
 del emdat_raw, emdat_ctr, rows
 

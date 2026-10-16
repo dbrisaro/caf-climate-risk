@@ -7,7 +7,8 @@ BASE_DIR = Path('/home/jupyter-daniela/CAF')
 OUT_DIR  = BASE_DIR / 'outputs/losses'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-T         = 45
+YEAR_MIN, YEAR_MAX = 1980, 2025
+T         = YEAR_MAX - YEAR_MIN + 1
 SUBGROUPS = ['Meteorological', 'Hydrological', 'Climatological']
 
 ISOS = {
@@ -31,8 +32,8 @@ rows = []
 for iso, (name, vsl) in ISOS.items():
     sub = df[
         (df['ISO'] == iso) &
-        (df['Start Year'] >= 1980) &
-        (df['Start Year'] <= 2025) &
+        (df['Start Year'] >= YEAR_MIN) &
+        (df['Start Year'] <= YEAR_MAX) &
         (df['Disaster Subgroup'].isin(SUBGROUPS))
     ]
     avg_deaths = sub['Total Deaths'].fillna(0).sum() / T

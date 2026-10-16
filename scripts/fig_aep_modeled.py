@@ -9,7 +9,8 @@ BASE_DIR = Path('/home/jupyter-daniela/CAF')
 OUT_DIR  = BASE_DIR / 'outputs/losses'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-T = 45
+YEAR_MIN, YEAR_MAX = 1980, 2025
+T = YEAR_MAX - YEAR_MIN + 1
 
 cat = pd.read_csv(BASE_DIR / 'outputs/losses/historical_loss_catalog.csv')
 
