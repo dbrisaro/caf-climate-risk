@@ -25,6 +25,12 @@ WB_ISO = {
     'Dominican Republic': 'DO', 'Haiti': 'HT', 'Jamaica': 'JM',
     'Saint Lucia': 'LC', 'Trinidad and Tobago': 'TT',
 }
+AMBIG_MODE = sys.argv[1] if len(sys.argv) > 1 else 'drop'
+if AMBIG_MODE not in ('drop', 'combine'):
+    raise ValueError("mode must be 'drop' or 'combine'")
+SUFFIX   = '' if AMBIG_MODE == 'drop' else '_sens_combined'
+COMBINED = 'Combined (shared parish names)'
+
 M6_PRED  = ['built_s', 'built_v', 'drought', 'rainfall', 'heatwave', 'wind_kt', 'log_pop', 'log_gdp']
 BUILT    = ['built_s', 'built_v']
 HAZARD   = ['drought', 'rainfall', 'heatwave', 'wind_kt']
@@ -49,8 +55,18 @@ print("\n[1] Loading data …")
 df = pd.read_parquet(DATA_PATH)
 gdf_shp = gpd.read_file(SHAPEFILE)[['region_nam', 'country']].rename(
     columns={'region_nam': 'region_name'})
+# Parish names shared across countries (e.g. Saint Andrew in Barbados, Jamaica and
+# Dominica) are a single merged series in master_panel, which is keyed by name only.
+# They are excluded ('drop', main spec) or kept once as a combined region outside
+# the country effects ('combine', sensitivity) pending a rebuild of the panel with
+# unique region keys.
+name_ctry = gdf_shp[gdf_shp['country'].isin(CARIB_8)].groupby('region_name')['country'].nunique()
+AMBIG     = sorted(name_ctry[name_ctry > 1].index)
+print(f"    Mode: {AMBIG_MODE}  ·  shared names ({len(AMBIG)}): {', '.join(AMBIG)}")
 df = df.merge(gdf_shp, on='region_name', how='left')
 df = df[df['country'].isin(CARIB_8)].copy()
+if AMBIG_MODE == 'drop':
+    df = df[~df['region_name'].isin(AMBIG)].copy()
 
 print("    Fetching GDP per capita (World Bank) …")
 iso_str = ';'.join(WB_ISO.values())
@@ -76,13 +92,23 @@ df_gdp = pd.DataFrame([
 
 panel = (
     df.groupby(['region_name', 'country', 'year']).agg(
-        total_losses_musd=('total_losses_musd', 'sum'),
+        total_losses_musd=('total_losses_musd', 'mean'),
         built_s=('built_s', 'mean'), built_v=('built_v', 'mean'),
         pop=('pop', 'mean'), drought=('drought', 'mean'),
         rainfall=('rainfall', 'mean'), heatwave=('heatwave', 'mean'),
     ).reset_index()
     .merge(df_gdp, on=['country', 'year'], how='left')
 )
+
+if AMBIG_MODE == 'combine':
+    amb = panel['region_name'].isin(AMBIG)
+    comb = (panel[amb].groupby(['region_name', 'year'])
+            .agg({**{c: 'first' for c in panel.columns
+                     if c not in ('region_name', 'year', 'country', 'gdp_pc')},
+                  'gdp_pc': 'mean'})
+            .reset_index()
+            .assign(country=COMBINED))
+    panel = pd.concat([panel[~amb], comb[panel.columns]], ignore_index=True)
 
 ibt = pd.read_parquet(IBTRACS_AGG)
 ibt_wind = (
@@ -105,7 +131,7 @@ panel = (panel[panel['total_losses_musd'] > 0]
 N         = len(panel)
 N_REGIONS = panel['region_name'].nunique()
 print(f"    Panel: {N:,} obs · {N_REGIONS} regions · {panel['country'].nunique()} countries")
-for c in CARIB_8:
+for c in CARIB_8 + ([COMBINED] if AMBIG_MODE == 'combine' else []):
     nr = panel[panel['country'] == c]['region_name'].nunique()
     no = (panel['country'] == c).sum()
     print(f"      {c:<28}: {no:>5} obs  {nr:>3} regions")
@@ -165,7 +191,7 @@ meta = pd.DataFrame([
     {'variable': 'N_regions',  'label': 'N_regions',   'coef': float(N_REGIONS), 'se': np.nan, 'pvalue': np.nan, 'ci_lo': np.nan, 'ci_hi': np.nan},
 ])
 df_coef = pd.concat([df_coef, meta], ignore_index=True)
-df_coef.to_csv(OUT_DIR / 'm6_carib_coefficients.csv', index=False)
+df_coef.to_csv(OUT_DIR / f'm6_carib_coefficients{SUFFIX}.csv', index=False)
 print(f"\n  → m6_carib_coefficients.csv")
 
 # ── [4] Partial-R² decomposition ─────────────────────────────────────────────
@@ -198,7 +224,7 @@ decomp = pd.DataFrame([
     {'group': 'r2_full',  'label': 'Within-R² (full M6)',
      'r2_excl': np.nan,         'partial_r2': within_r2,    'share': 1.0},
 ])
-decomp.to_csv(OUT_DIR / 'm6_carib_decomposition.csv', index=False)
+decomp.to_csv(OUT_DIR / f'm6_carib_decomposition{SUFFIX}.csv', index=False)
 
 print(f"  {'Group':<18} {'R² excl.':>10} {'Partial R²':>12} {'Share':>8}")
 print("  " + "-" * 52)
@@ -213,6 +239,7 @@ print("\n[5] Country fixed effects …")
 entity_fe = eff.groupby(level=0).mean()
 region_country = panel_idx.groupby(level=0)['country'].first()
 aux = pd.DataFrame({'effect': entity_fe, 'country': region_country})
+aux = aux[aux['country'] != COMBINED]
 
 other = [c for c in CARIB_8 if c != 'Bahamas']
 cdums = pd.get_dummies(aux['country'], drop_first=False)
@@ -226,6 +253,7 @@ pv_map  = dict(zip(pnames, ols_aux.pvalues))
 
 gdp_map  = panel.groupby('country')['gdp_pc'].mean()
 nobs_map = panel.groupby('country').size()
+nreg_map = panel.groupby('country')['region_name'].nunique()
 
 fe_rows = []
 for c in CARIB_8:
@@ -233,14 +261,16 @@ for c in CARIB_8:
         fe_rows.append({'country': c, 'fixed_effect': 0.0, 'se': np.nan,
                         'p_value': np.nan,
                         'gdp_per_capita_usd': float(gdp_map.get(c, np.nan)),
-                        'n_obs': int(nobs_map.get(c, 0))})
+                        'n_obs': int(nobs_map.get(c, 0)),
+                        'n_regions': int(nreg_map.get(c, 0))})
     else:
         fe_rows.append({'country': c,
                         'fixed_effect': float(p_map.get(c, np.nan)),
                         'se':           float(se_map.get(c, np.nan)),
                         'p_value':      float(pv_map.get(c, np.nan)),
                         'gdp_per_capita_usd': float(gdp_map.get(c, np.nan)),
-                        'n_obs': int(nobs_map.get(c, 0))})
+                        'n_obs': int(nobs_map.get(c, 0)),
+                        'n_regions': int(nreg_map.get(c, 0))})
 
 df_fe = (pd.DataFrame(fe_rows)
            .sort_values('fixed_effect', ascending=False)
@@ -253,8 +283,9 @@ for _, r in df_fe.iterrows():
     p_s  = f"{r['p_value']:.4f}" if pd.notna(r['p_value']) else "       —"
     print(f"  {r['country']:<25} {r['fixed_effect']:+8.4f} {se_s:>7} {p_s:>8}  {int(r['n_obs']):>6} {stars(r['p_value'])}")
 
-df_fe.to_csv(OUT_DIR / 'm6_carib_fixed_effects.csv', index=False)
-df_fe.to_csv(OUT_DIR / 'fixed_effects_clean.csv', index=False)
+df_fe.to_csv(OUT_DIR / f'm6_carib_fixed_effects{SUFFIX}.csv', index=False)
+if AMBIG_MODE == 'drop':
+    df_fe.to_csv(OUT_DIR / 'fixed_effects_clean.csv', index=False)
 print(f"\n  → m6_carib_fixed_effects.csv")
 print(f"  → fixed_effects_clean.csv  (consumed by fig_2_2)")
 
@@ -270,9 +301,9 @@ DS_ROWS = [
     ('Rainfall index', 'rainfall',           'fraction'),
     ('Heatwave index', 'heatwave',           '[0,1]'),
     ('Wind speed',     'wind_kt',            'kt'),
-    ('log(Population)','log_pop',            'log(thous.)'),
+    ('log(Population)','log_pop',            'log(1+persons per 100 m cell)'),
     ('log(GDP p.c.)',  'log_gdp',            'log(2015 USD)'),
-    ('Population',     'pop',                'thousands'),
+    ('Population',     'pop',                'persons per 100 m cell (region mean)'),
     ('GDP per capita', 'gdp_pc',             '2015 USD'),
 ]
 
@@ -284,7 +315,7 @@ for label, col, unit in DS_ROWS:
                        'p25': s.quantile(.25), 'p50': s.median(),
                        'p75': s.quantile(.75), 'max': s.max()})
 df_ds = pd.DataFrame(ds_records)
-df_ds.to_csv(OUT_DIR / 'descriptive_stats_m6_carib.csv', index=False)
+df_ds.to_csv(OUT_DIR / f'descriptive_stats_m6_carib{SUFFIX}.csv', index=False)
 
 def _fmt(v):
     if abs(v) >= 100:   return f"{v:,.1f}"
@@ -296,7 +327,8 @@ tex = [
     r'\begin{table}[htbp]', r'\centering',
     r'\caption{Descriptive statistics — M6 estimation panel (8 Caribbean countries, '
     r'region-years with total losses $>0$, no missing predictors). '
-    f'$N={N:,}$ observations, {N_REGIONS} sub-national regions, 1995--2024. '
+    f'$N={N:,}$ observations, {N_REGIONS} sub-national regions, '
+    f"{panel['year'].min()}--{panel['year'].max()}. "
     r'GDP per capita: World Bank NY.GDP.PCAP.KD (constant 2015 USD).}',
     r'\label{tab:desc_stats_m6}',
     r'\small',
@@ -309,7 +341,7 @@ for _, r in df_ds.iterrows():
     vals = [_fmt(r[c]) for c in ('mean','sd','min','p25','p50','p75','max')]
     tex.append(f"{r['variable']} & {r['units']} & {int(r['n']):,} & " + " & ".join(vals) + r" \\")
 tex += [r'\bottomrule', r'\end{tabular}', r'\end{table}']
-with open(OUT_DIR / 'descriptive_stats_m6_carib.tex', 'w') as f:
+with open(OUT_DIR / f'descriptive_stats_m6_carib{SUFFIX}.tex', 'w') as f:
     f.write('\n'.join(tex))
 
 print(f"  → descriptive_stats_m6_carib.csv")
