@@ -96,6 +96,11 @@ log.info("Computing losses per country per storm …")
 countries = sorted(buildings['country'].unique())
 rows = []
 
+grp_keys, grp_idx = np.unique(
+    np.char.add(np.char.add(bld_country.astype(str), '|'), bld_types.astype(str)),
+    return_inverse=True)
+cls_loss = {sc: np.zeros(len(grp_keys)) for sc in ('low', 'mid', 'high')}
+
 for ev_i, sid in enumerate(event_names):
     vmax     = np.asarray(haz.intensity[ev_i, :].todense()).ravel()
     vmax_bld = vmax[idx]
@@ -104,6 +109,10 @@ for ev_i, sid in enumerate(event_names):
 
     if mdr.sum() == 0:
         continue
+
+    for sc in ('low', 'mid', 'high'):
+        cls_loss[sc] += np.bincount(grp_idx, weights=mdr * bld_value[sc],
+                                    minlength=len(grp_keys))
 
     m = meta_dict.get(sid, {})
     for country in countries:
@@ -142,13 +151,30 @@ t52 = (t51.groupby('country')
 total_regional = t52['total_loss_mid'].sum()
 t52['pct_regional'] = (t52['total_loss_mid'] / total_regional * 100).round(1)
 
+CLASS_LABEL = {'school': 'Education', 'government': 'Government', 'other': 'Housing'}
+t53 = pd.DataFrame({
+    'country':        [k.split('|')[0] for k in grp_keys],
+    'building_type':  [k.split('|')[1] for k in grp_keys],
+    'total_loss_low':  cls_loss['low'],
+    'total_loss_mid':  cls_loss['mid'],
+    'total_loss_high': cls_loss['high'],
+})
+t53['building_class'] = t53['building_type'].map(CLASS_LABEL)
+t53 = (t53[['country', 'building_type', 'building_class',
+            'total_loss_low', 'total_loss_mid', 'total_loss_high']]
+       .sort_values(['country', 'building_type'])
+       .reset_index(drop=True))
+
 out_51 = OUT_DIR / 'table_5_1_wind_by_country_storm.csv'
 out_52 = OUT_DIR / 'table_5_2_wind_cumulative_by_country.csv'
+out_53 = OUT_DIR / 'table_5_3_wind_cumulative_by_country_class.csv'
 t51.to_csv(out_51, index=False)
 t52.to_csv(out_52, index=False)
+t53.to_csv(out_53, index=False)
 
 log.info("Saved → %s", out_51)
 log.info("Saved → %s", out_52)
+log.info("Saved → %s", out_53)
 
 print()
 print("Table 5.2 — Cumulative wind losses 1980–2025 by country:")
