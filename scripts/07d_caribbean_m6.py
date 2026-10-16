@@ -6,6 +6,7 @@ import pandas as pd
 import geopandas as gpd
 import requests
 import statsmodels.api as sm
+from scipy import stats
 from pathlib import Path
 from linearmodels import PanelOLS
 
@@ -14,6 +15,7 @@ DATA_PATH   = BASE_DIR / 'data/processed/caribbean_adm_boundaries/master_panel.p
 SHAPEFILE   = BASE_DIR / 'data/caribbean_adm_boundaries/caribbean_adm_boundaries.shp'
 IBTRACS_AGG = BASE_DIR / 'data/processed/caribbean_adm_boundaries/ibtracs_output/ibtracs_aggregated_data.parquet'
 OUT_DIR     = BASE_DIR / 'outputs/regression'
+GDP_CACHE   = BASE_DIR / 'data/processed/caribbean_adm_boundaries/wb_gdp_pc_NY.GDP.PCAP.KD_1995_2025.csv'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 CARIB_8 = [
@@ -68,27 +70,32 @@ df = df[df['country'].isin(CARIB_8)].copy()
 if AMBIG_MODE == 'drop':
     df = df[~df['region_name'].isin(AMBIG)].copy()
 
-print("    Fetching GDP per capita (World Bank) …")
-iso_str = ';'.join(WB_ISO.values())
-wb_data = None
-for _att in range(3):
-    try:
-        wb_data = requests.get(
-            f'https://api.worldbank.org/v2/country/{iso_str}/indicator/'
-            f'NY.GDP.PCAP.KD?date=1995:2025&format=json&per_page=500',
-            timeout=120
-        ).json()[1]
-        break
-    except Exception as e:
-        print(f"      Attempt {_att+1}: {e}")
-if wb_data is None:
-    raise RuntimeError("World Bank API unavailable")
-
-iso_to_ctry = {v: k for k, v in WB_ISO.items()}
-df_gdp = pd.DataFrame([
-    {'country': iso_to_ctry[r['country']['id']], 'year': int(r['date']), 'gdp_pc': r['value']}
-    for r in wb_data if r['value'] is not None
-])
+if GDP_CACHE.exists():
+    print(f"    GDP per capita: {GDP_CACHE.name} (cached World Bank series)")
+    df_gdp = pd.read_csv(GDP_CACHE)
+else:
+    print("    Fetching GDP per capita (World Bank) …")
+    iso_str = ';'.join(WB_ISO.values())
+    wb_data = None
+    for _att in range(3):
+        try:
+            wb_data = requests.get(
+                f'https://api.worldbank.org/v2/country/{iso_str}/indicator/'
+                f'NY.GDP.PCAP.KD?date=1995:2025&format=json&per_page=500',
+                timeout=120
+            ).json()[1]
+            break
+        except Exception as e:
+            print(f"      Attempt {_att+1}: {e}")
+    if wb_data is None:
+        raise RuntimeError("World Bank API unavailable")
+    iso_to_ctry = {v: k for k, v in WB_ISO.items()}
+    df_gdp = pd.DataFrame([
+        {'country': iso_to_ctry[r['country']['id']], 'year': int(r['date']), 'gdp_pc': r['value']}
+        for r in wb_data if r['value'] is not None
+    ]).sort_values(['country', 'year']).reset_index(drop=True)
+    df_gdp.to_csv(GDP_CACHE, index=False)
+    print(f"    Saved → {GDP_CACHE}")
 
 panel = (
     df.groupby(['region_name', 'country', 'year']).agg(
@@ -157,6 +164,20 @@ except Exception as e:
     res = mod.fit(cov_type='clustered', cluster_entity=True)
 
 within_r2 = float(res.rsquared)
+
+wald_b = res.wald_test(formula='built_s = 0, built_v = 0')
+V_b    = res.cov.loc[BUILT, BUILT]
+sum_b  = float(res.params[BUILT].sum())
+se_sum = float(np.sqrt(V_b.values.sum()))
+p_sum  = float(2 * (1 - stats.norm.cdf(abs(sum_b / se_sum))))
+pd.DataFrame([
+    {'test': 'joint built_s = built_v = 0', 'statistic': float(wald_b.stat),
+     'df': int(wald_b.df), 'pvalue': float(wald_b.pval), 'estimate': np.nan, 'se': np.nan},
+    {'test': 'built_s + built_v', 'statistic': sum_b / se_sum, 'df': 1,
+     'pvalue': p_sum, 'estimate': sum_b, 'se': se_sum},
+]).to_csv(OUT_DIR / f'm6_carib_built_test{SUFFIX}.csv', index=False)
+print(f"    Built joint Wald χ²({int(wald_b.df)}) = {float(wald_b.stat):.3f}, p = {float(wald_b.pval):.4f}")
+print(f"    built_s + built_v = {sum_b:+.4f} (SE {se_sum:.4f}, p = {p_sum:.4f})")
 
 eff = res.estimated_effects
 if isinstance(eff, pd.DataFrame):
@@ -250,6 +271,9 @@ pnames  = ['const'] + other
 p_map   = dict(zip(pnames, ols_aux.params))
 se_map  = dict(zip(pnames, ols_aux.bse))
 pv_map  = dict(zip(pnames, ols_aux.pvalues))
+ci_aux  = np.asarray(ols_aux.conf_int())
+lo_map  = dict(zip(pnames, ci_aux[:, 0]))
+hi_map  = dict(zip(pnames, ci_aux[:, 1]))
 
 gdp_map  = panel.groupby('country')['gdp_pc'].mean()
 nobs_map = panel.groupby('country').size()
@@ -259,6 +283,7 @@ fe_rows = []
 for c in CARIB_8:
     if c == 'Bahamas':
         fe_rows.append({'country': c, 'fixed_effect': 0.0, 'se': np.nan,
+                        'ci_95_lo': np.nan, 'ci_95_hi': np.nan,
                         'p_value': np.nan,
                         'gdp_per_capita_usd': float(gdp_map.get(c, np.nan)),
                         'n_obs': int(nobs_map.get(c, 0)),
@@ -267,6 +292,8 @@ for c in CARIB_8:
         fe_rows.append({'country': c,
                         'fixed_effect': float(p_map.get(c, np.nan)),
                         'se':           float(se_map.get(c, np.nan)),
+                        'ci_95_lo':     float(lo_map.get(c, np.nan)),
+                        'ci_95_hi':     float(hi_map.get(c, np.nan)),
                         'p_value':      float(pv_map.get(c, np.nan)),
                         'gdp_per_capita_usd': float(gdp_map.get(c, np.nan)),
                         'n_obs': int(nobs_map.get(c, 0)),
@@ -295,8 +322,8 @@ print("\n[6] Descriptive statistics (Table B.5) …")
 DS_ROWS = [
     ('log(1+Loss)',     'log_loss',          'log(1+MUSD)'),
     ('Total losses',   'total_losses_musd',  'MUSD'),
-    ('Built surface',  'built_s',            'km²/cell'),
-    ('Built volume',   'built_v',            'km³/cell ×10³'),
+    ('Built surface',  'built_s',            'm² per 100 m cell'),
+    ('Built volume',   'built_v',            'm³ per 100 m cell'),
     ('Drought index',  'drought',            'fraction'),
     ('Rainfall index', 'rainfall',           'fraction'),
     ('Heatwave index', 'heatwave',           '[0,1]'),

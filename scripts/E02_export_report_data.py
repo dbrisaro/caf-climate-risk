@@ -212,12 +212,11 @@ del ep, ep95, ep30, ep_m, nat, fig19
 
 print("  Tab_2_3_FixedEffects …")
 fe = pd.read_csv(BASE / 'outputs/regression/fixed_effects_clean.csv')
-fe['ci_95_lo'] = (fe['fixed_effect'] - 1.96 * fe['se']).round(4)
-fe['ci_95_hi'] = (fe['fixed_effect'] + 1.96 * fe['se']).round(4)
 fe['note'] = fe['p_value'].apply(
     lambda p: '***' if p < 0.001 else '**' if p < 0.01 else '*' if p < 0.05 else
               '†'   if p < 0.10  else '')
-(fe[['country', 'fixed_effect', 'se', 'ci_95_lo', 'ci_95_hi', 'p_value', 'note', 'gdp_per_capita_usd']]
+(fe[['country', 'fixed_effect', 'se', 'ci_95_lo', 'ci_95_hi', 'p_value', 'note',
+     'n_obs', 'n_regions', 'gdp_per_capita_usd']]
    .sort_values('fixed_effect', ascending=False)
    .to_excel(writer, sheet_name='Tab_2_3_FixedEffects', index=False))
 del fe
